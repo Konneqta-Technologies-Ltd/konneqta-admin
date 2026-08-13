@@ -1,0 +1,8 @@
+allowBuilds:
+  unrs-resolver: false
+
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+
+minimumReleaseAge: 0

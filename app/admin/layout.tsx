@@ -19,9 +19,14 @@ export default async function AdminLayout({
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside className="hidden w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-900 md:flex">
         <div className="flex h-16 items-center gap-3 border-b border-zinc-800 px-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-base font-black text-zinc-950">
-            K
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, next/image adds no value */}
+          <img
+            src="/konneqta-logo.png"
+            alt="Konneqta logo"
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
+          />
           <span className="text-sm font-semibold tracking-tight">
             Konneqta Admin
           </span>
@@ -60,9 +65,14 @@ export default async function AdminLayout({
         {/* Top bar */}
         <header className="flex h-16 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-6">
           <div className="flex items-center gap-3 md:hidden">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-base font-black text-zinc-950">
-              K
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, next/image adds no value */}
+            <img
+              src="/konneqta-logo.png"
+              alt="Konneqta logo"
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-lg"
+            />
             <span className="text-sm font-semibold">Konneqta Admin</span>
           </div>
           <div className="hidden md:block" />

@@ -79,9 +79,14 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo / wordmark */}
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-2xl font-black text-zinc-950">
-            K
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, next/image adds no value */}
+          <img
+            src="/konneqta-logo.png"
+            alt="Konneqta logo"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-xl"
+          />
           <h1 className="text-xl font-semibold tracking-tight text-white">
             Konneqta Admin
           </h1>

@@ -18,6 +18,9 @@ import { createClient } from "@/lib/supabase/client";
  * The proxy and requireAdmin() enforce the same checks server-side — the
  * client-side check here is just for fast, friendly feedback.
  */
+
+
+export const dynamic = "force-dynamic";
 export default function LoginPage() {
   const supabase = createClient();
   const router = useRouter();

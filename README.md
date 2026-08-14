@@ -31,6 +31,44 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+### Vercel project settings (important)
+
+This repo lives at the **root** of the repository — make sure Vercel is not
+pointing at a subdirectory:
+
+- **Settings → General → Root Directory**: leave empty (i.e. repo root), since
+  `package.json` is at the top level. A mismatch here causes
+  `Error: No Next.js version detected`.
+- **Framework Preset**: Next.js (pinned via `vercel.json`).
+- **Install Command**: `pnpm install` (pinned via `vercel.json`; the lockfile
+  is `pnpm-lock.yaml`).
+- **Node.js Version**: 22 (pinned via `.nvmrc`).
+
+If a previous deploy failed with `No Next.js version detected`, clear the
+stale build cache once: **Deployments → ⋯ → Redeploy → check "clear cache"**.
+
+### Environment variables
+
+Set these in **Vercel → Settings → Environment Variables** (and in GitHub
+Actions secrets for CI):
+
+| Variable                              | Used by                            |
+| ------------------------------------- | ---------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`            | Browser, server, proxy             |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`| Browser, server, proxy (anon key)  |
+| `SUPABASE_SERVICE_ROLE_KEY`           | Server-only (`lib/supabase/admin`) |
+
+The build is designed to succeed even when these are absent (CI), but the app
+requires them at runtime.
+
+### Build-time safety note
+
+`"use client"` pages are still prerendered (SSR'd) during `next build`.
+Never create a Supabase browser client at component top-level — always create
+it lazily inside event handlers/effects (see `app/login/page.tsx` and
+`app/admin/logout-button.tsx`), otherwise the build fails when env vars are
+not present in the build environment.

@@ -19,10 +19,7 @@ import { createClient } from "@/lib/supabase/client";
  * client-side check here is just for fast, friendly feedback.
  */
 
-
-export const dynamic = "force-dynamic";
 export default function LoginPage() {
-  const supabase = createClient();
   const router = useRouter();
 
   const [email, setEmail] = useState("");
@@ -36,6 +33,12 @@ export default function LoginPage() {
     setError(null);
 
     try {
+      // Create the client LAZILY (inside the handler, not at render time)
+      // so prerendering this page during `next build` never touches the
+      // Supabase env vars — the build succeeds even when secrets are not
+      // configured in the CI environment. (Same pattern as logout-button.)
+      const supabase = createClient();
+
       // 1. Authenticate against Supabase Auth.
       const { data, error: authError } =
         await supabase.auth.signInWithPassword({ email, password });

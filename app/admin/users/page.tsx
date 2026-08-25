@@ -8,7 +8,7 @@ import { getCustomerUsers } from "@/lib/admin/data";
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const session = await requireAdmin();
   const canRead = await hasPermission(session, "users.read");
@@ -16,10 +16,28 @@ export default async function AdminUsersPage({
 
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
-  const [users, canUpdate] = await Promise.all([
-    getCustomerUsers(query),
-    hasPermission(session, "users.update"),
-  ]);
+  const requestedPage = Math.max(
+    1,
+    Number.parseInt(params.page ?? "1", 10) || 1
+  );
+  const canUpdate = await hasPermission(session, "users.update");
+
+  let result = await getCustomerUsers(query, requestedPage);
+  // A stale ?page= beyond the last page (e.g. after a search narrowed the
+  // results) — clamp to the last real page and re-fetch once.
+  const totalPages = Math.max(1, Math.ceil(result.total / result.perPage));
+  if (result.page > totalPages) {
+    result = await getCustomerUsers(query, totalPages);
+  }
+  const { users, total, page, perPage } = result;
+
+  const pageHref = (target: number) => {
+    const search = new URLSearchParams();
+    if (query) search.set("q", query);
+    if (target > 1) search.set("page", String(target));
+    const qs = search.toString();
+    return qs ? `/admin/users?${qs}` : "/admin/users";
+  };
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -40,6 +58,11 @@ export default async function AdminUsersPage({
           action="/admin/users"
         >
           <input
+            type="hidden"
+            name="page"
+            value="1"
+          />
+          <input
             name="q"
             defaultValue={query}
             placeholder="Search email, username, or name"
@@ -53,7 +76,7 @@ export default async function AdminUsersPage({
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="border-b border-zinc-800 px-5 py-4 text-sm text-zinc-400">
-          {users.length.toLocaleString()} matching users
+          {total.toLocaleString()} matching user{total === 1 ? "" : "s"}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
@@ -105,6 +128,70 @@ export default async function AdminUsersPage({
           <p className="px-5 py-10 text-center text-sm text-zinc-500">
             No users match this search.
           </p>
+        )}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          perPage={perPage}
+          hrefFor={pageHref}
+        />
+      </div>
+    </div>
+  );
+}
+
+function Pagination({
+  page,
+  totalPages,
+  total,
+  perPage,
+  hrefFor,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  perPage: number;
+  hrefFor: (page: number) => string;
+}) {
+  if (total === 0) return null;
+
+  const from = (page - 1) * perPage + 1;
+  const to = Math.min(total, page * perPage);
+
+  return (
+    <div className="flex items-center justify-between gap-4 border-t border-zinc-800 px-5 py-3 text-sm">
+      <p className="text-zinc-500">
+        Showing {from.toLocaleString()}–{to.toLocaleString()} of{" "}
+        {total.toLocaleString()}
+      </p>
+      <div className="flex items-center gap-2">
+        {page > 1 ? (
+          <Link
+            href={hrefFor(page - 1)}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+          >
+            ← Previous
+          </Link>
+        ) : (
+          <span className="rounded-md border border-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-600">
+            ← Previous
+          </span>
+        )}
+        <span className="text-xs text-zinc-400">
+          Page {page.toLocaleString()} of {totalPages.toLocaleString()}
+        </span>
+        {page < totalPages ? (
+          <Link
+            href={hrefFor(page + 1)}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+          >
+            Next →
+          </Link>
+        ) : (
+          <span className="rounded-md border border-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-600">
+            Next →
+          </span>
         )}
       </div>
     </div>

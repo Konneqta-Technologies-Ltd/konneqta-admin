@@ -1,39 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Konneqta Admin
 
-## Getting Started
+Internal administration console for the Konneqta platform — invite-only,
+role-based, and fully audited. Built with Next.js (App Router), Supabase,
+and Tailwind CSS.
 
-First, run the development server:
+> **Not the Next.js you know** — this project pins a recent Next.js major.
+> Consult `node_modules/next/dist/docs/` before touching framework APIs.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Features
+
+- **Dashboard** — live platform stats (users, cards, payments, Pro subscribers)
+- **Customer users** — server-side search (email / username / name / UUID),
+  pagination, suspension with exact pre-suspension-status restore
+- **Complimentary Pro grants** — grant/extend/revoke Pro without payment,
+  with stacking expiry windows and a full grant history
+- **Administrators** — invite admins (Supabase invitation email), change
+  roles/statuses, last-super-admin protection
+- **Audit log** — every sensitive action, filterable by action and admin
+
+## Scripts
+
+| Command             | What it does                  |
+| ------------------- | ----------------------------- |
+| `pnpm dev`          | Start the dev server          |
+| `pnpm build`        | Production build              |
+| `pnpm start`        | Serve the production build    |
+| `pnpm lint`         | ESLint (Next core-web-vitals) |
+| `pnpm typecheck`    | `tsc --noEmit`                |
+| `pnpm test`         | Vitest unit tests (CI mode)   |
+| `pnpm test:watch`   | Vitest in watch mode          |
+
+## Architecture
+
+```
+proxy.ts                      optimistic auth check + Supabase cookie refresh
+lib/auth/session.ts           getAdminUser() — React cache()-wrapped
+lib/auth/guard.ts             requireAdmin() / requireAdminApi() / hasPermission()
+lib/supabase/admin.ts         service-role client (SERVER ONLY)
+lib/supabase/server.ts        anon-key server client (respects RLS)
+lib/supabase/client.ts        browser client (login only)
+lib/admin/data.ts             reads via SQL views/RPCs (see DB section)
+lib/admin/grants.ts           complimentary-Pro domain logic
+app/admin/**                  dashboard pages (server components)
+app/api/admin/**              mutation endpoints (guarded, audited)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Security model
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **No public signup.** Admin access exists only as rows in `admin_users`,
+   created by a Super Admin through the app.
+2. **Defense in depth.** The proxy performs an optimistic cookie check;
+   `requireAdmin()` (pages) / `requireAdminApi()` (API) do full verification;
+   RLS is the database boundary.
+3. **RBAC.** Permissions (`users.read`, `admins.create`, …) attach to roles via
+   `admin_role_permissions`. `super_admin` bypasses every check.
+4. **Append-only audit.** Every mutation inserts into `admin_audit_logs`;
+   no update/delete policies exist.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Database setup
 
-## Learn More
+Run **both** scripts in the SQL editor of the SAME Supabase project that
+powers the customer app, in this order. Both are idempotent — re-run them
+whenever they change.
 
-To learn more about Next.js, take a look at the following resources:
+| Script                          | Installs                                                    |
+| ------------------------------- | ----------------------------------------------------------- |
+| `supabase/admin-auth-setup.sql` | Admin roles/permissions/accounts, RLS policies, audit logs, the legacy suspension RPC, `pro_grants` |
+| `supabase/admin-data-views.sql` | Directory views + dashboard stats + lookup RPCs + the **atomic** suspension RPC (+ indexes) |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The second script is what makes the admin app scale: the dashboard, user
+search, admin list, and audit viewer each run **one** O(page) query instead
+of loading the entire auth user base into memory.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+After the first run of `admin-auth-setup.sql`, bootstrap the first Super
+Admin with the one-time statement at the bottom of that script.
 
-## Deploy on Vercel
+### Deploy order
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app-readme) from the creators of Next.js.
+1. Apply any new SQL to Supabase first (the scripts are additive).
+2. Deploy the app. Rollback = revert the code; leftover views are inert.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Vercel deployment
 
 ### Vercel project settings (important)
 
@@ -56,29 +103,14 @@ stale build cache once: **Deployments → ⋯ → Redeploy → check "clear cach
 Set these in **Vercel → Settings → Environment Variables** (and in GitHub
 Actions secrets for CI):
 
-| Variable                              | Used by                            |
-| ------------------------------------- | ---------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`            | Browser, server, proxy             |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`| Browser, server, proxy (anon key)  |
-| `SUPABASE_SERVICE_ROLE_KEY`           | Server-only (`lib/supabase/admin`) |
+| Variable                               | Used by                            |
+| -------------------------------------- | ---------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`             | Browser, server, proxy             |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser, server, proxy (anon key)  |
+| `SUPABASE_SERVICE_ROLE_KEY`            | Server-only (`lib/supabase/admin`) |
 
 The build is designed to succeed even when these are absent (CI), but the app
 requires them at runtime.
-
-### Admin database setup
-
-Run `supabase/admin-auth-setup.sql` in the SQL editor of the same Supabase
-project used by the customer app. The script is idempotent and should be run
-again when it changes. It installs:
-
-- Admin roles, permissions, accounts, and append-only audit logs
-- RLS policies for the admin authorization boundary
-- The service-role-only customer suspension RPC used by `/admin/users`
-- The `pro_grants` table + `users.grant_pro` permission behind the
-  complimentary-Pro flow (`/admin/users/[id]` panel and `/admin/grants`)
-
-The Phase 2 dashboard provides live platform statistics, customer search and
-suspension, admin invitations and access management, and an audit log viewer.
 
 ### Build-time safety note
 
@@ -87,3 +119,17 @@ Never create a Supabase browser client at component top-level — always create
 it lazily inside event handlers/effects (see `app/login/page.tsx` and
 `app/admin/logout-button.tsx`), otherwise the build fails when env vars are
 not present in the build environment.
+
+## Testing
+
+Unit tests cover the pure domain logic (grant lifecycle, Pro expiry math,
+search-term sanitisation, formatting):
+
+```bash
+pnpm test        # CI mode
+pnpm test:watch  # watch mode
+```
+
+CI (`.github/workflows/ci.yml`) runs lint → type-check → tests → build on
+every push/PR to `main` and `dev`.
+

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { getAdminUser, type AdminSession } from "@/lib/auth/session";
 
@@ -70,41 +71,46 @@ export async function requireAdminApi(): Promise<
   return { ok: true, session };
 }
 
-/**
- * Permission check for API routes (Phase 2+).
- *
- * Checks whether the active admin's role has a given permission
- * (e.g. "users.read", "admins.create") via admin_role_permissions.
- *
- * Super Admin always passes: the role is defined as "Full, unrestricted
- * access to every admin capability", so it must never be at the mercy of a
- * missing/stale permission seed row.
- *
- * Always pair with requireAdminApi() — this function assumes the caller
- * is already verified as an active admin.
- */
-export async function hasPermission(
-  session: AdminSession,
-  permission: string
-): Promise<boolean> {
-  // Super Admin bypasses every permission check.
-  if (session.admin?.role.name === "super_admin") return true;
+export const hasPermission = cache(
+  /**
+   * Permission check for API routes (Phase 2+).
+   *
+   * Checks whether the active admin's role has a given permission
+   * (e.g. "users.read", "admins.create") via admin_role_permissions.
+   *
+   * Super Admin always passes: the role is defined as "Full, unrestricted
+   * access to every admin capability", so it must never be at the mercy of a
+   * missing/stale permission seed row.
+   *
+   * Always pair with requireAdminApi() — this function assumes the caller
+   * is already verified as an active admin.
+   *
+   * Wrapped in React `cache()`: pages check several permissions per render
+   * and each check is a Supabase round trip — this dedupes them per request.
+   */
+  async function hasPermission(
+    session: AdminSession,
+    permission: string
+  ): Promise<boolean> {
+    // Super Admin bypasses every permission check.
+    if (session.admin?.role.name === "super_admin") return true;
 
-  // Import lazily to avoid cycles; createAdminClient is server-only.
-  const { createAdminClient } = await import("@/lib/supabase/admin");
+    // Import lazily to avoid cycles; createAdminClient is server-only.
+    const { createAdminClient } = await import("@/lib/supabase/admin");
 
-  const admin = createAdminClient();
+    const admin = createAdminClient();
 
-  const { data } = await admin
-    .from("admin_role_permissions")
-    .select("permission:admin_permissions (name)")
-    .eq("role_id", session.admin!.role_id);
+    const { data } = await admin
+      .from("admin_role_permissions")
+      .select("permission:admin_permissions (name)")
+      .eq("role_id", session.admin!.role_id);
 
-  if (!data) return false;
+    if (!data) return false;
 
-  return data.some(
-    (row) =>
-      (row.permission as unknown as { name: string } | null)?.name ===
-      permission
-  );
-}
+    return data.some(
+      (row) =>
+        (row.permission as unknown as { name: string } | null)?.name ===
+        permission
+    );
+  }
+);

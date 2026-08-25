@@ -1,6 +1,7 @@
 import "./globals.css";
 
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 
 import type { Metadata } from "next";
 
@@ -26,7 +27,11 @@ export default function RootLayout({ children }: {children: React.ReactNode}) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        {/* App-wide toast mount — dark theme to match the admin console. */}
+        <Toaster theme="dark" position="top-center" richColors closeButton />
+      </body>
     </html>
   );
 }

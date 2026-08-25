@@ -65,6 +65,21 @@ Actions secrets for CI):
 The build is designed to succeed even when these are absent (CI), but the app
 requires them at runtime.
 
+### Admin database setup
+
+Run `supabase/admin-auth-setup.sql` in the SQL editor of the same Supabase
+project used by the customer app. The script is idempotent and should be run
+again when it changes. It installs:
+
+- Admin roles, permissions, accounts, and append-only audit logs
+- RLS policies for the admin authorization boundary
+- The service-role-only customer suspension RPC used by `/admin/users`
+- The `pro_grants` table + `users.grant_pro` permission behind the
+  complimentary-Pro flow (`/admin/users/[id]` panel and `/admin/grants`)
+
+The Phase 2 dashboard provides live platform statistics, customer search and
+suspension, admin invitations and access management, and an audit log viewer.
+
 ### Build-time safety note
 
 `"use client"` pages are still prerendered (SSR'd) during `next build`.

@@ -1,21 +1,14 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 
-type AuthUser = {
-  id: string;
-  email?: string;
-  created_at: string;
-  banned_until?: string;
-};
-
-type ProfileRow = {
-  id: string;
-  username: string | null;
-  full_name: string | null;
-  plan: string | null;
-  is_exempt: boolean | null;
-  pro_expires_at: string | null;
-  status: "active" | "deactivated" | null;
-};
+/**
+ * Admin data-access layer.
+ *
+ * All reads go through the SQL views / RPCs defined in
+ * supabase/admin-data-views.sql (service-role only). Every query is
+ * O(page size) — the legacy implementation loaded every auth user,
+ * profile, and card row into Node memory on each request.
+ */
 
 export type DashboardStats = {
   totalUsers: number;
@@ -66,184 +59,220 @@ export type AuditLog = {
   adminEmail: string;
 };
 
-async function listAuthUsers(): Promise<AuthUser[]> {
-  const admin = createAdminClient();
-  const users: AuthUser[] = [];
-  const perPage = 1000;
+/** Row shape of the admin_customer_directory view. */
+type DirectoryRow = {
+  id: string;
+  email: string | null;
+  username: string | null;
+  full_name: string | null;
+  plan: string | null;
+  is_exempt: boolean | null;
+  pro_expires_at: string | null;
+  status: "active" | "deactivated" | "suspended";
+  created_at: string | null;
+  card_count: number | null;
+};
 
-  for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
-    if (error) throw error;
+export const CUSTOMERS_PER_PAGE = 25;
+export const CUSTOMERS_PER_PAGE_MAX = 100;
 
-    const batch = data.users as AuthUser[];
-    users.push(...batch);
-    if (batch.length < perPage) break;
-  }
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  return users;
+/**
+ * Strip characters that carry meaning in PostgREST filter syntax / SQL LIKE
+ * patterns (`%`, `_` wildcards aside — see buildCustomerSearchFilter) so user
+ * input can never widen or break the query.
+ */
+export function sanitizeSearchTerm(term: string | null | undefined): string {
+  return (term ?? "").trim().replace(/[%,"()\\]/g, "");
 }
 
-function countByOwner(rows: Array<{ owner_id: string }> | null) {
-  const counts = new Map<string, number>();
-  for (const row of rows ?? []) {
-    counts.set(row.owner_id, (counts.get(row.owner_id) ?? 0) + 1);
-  }
-  return counts;
+/**
+ * PostgREST `.or(...)` filter across the directory view's searchable columns.
+ * Returns null when the term is empty after sanitising.
+ */
+export function buildCustomerSearchFilter(
+  term: string | null | undefined
+): string | null {
+  const clean = sanitizeSearchTerm(term);
+  if (!clean) return null;
+
+  const like = `%${clean}%`;
+  const parts = [
+    `email.ilike.${like}`,
+    `username.ilike.${like}`,
+    `full_name.ilike.${like}`,
+  ];
+  if (UUID_RE.test(clean)) parts.push(`id.eq.${clean}`);
+  return parts.join(",");
 }
 
-function isAuthUserBanned(user: AuthUser | undefined) {
-  if (!user?.banned_until) return false;
-  return new Date(user.banned_until).getTime() > Date.now();
+function toCustomerUser(row: DirectoryRow): CustomerUser {
+  return {
+    id: row.id,
+    email: row.email ?? "Unknown email",
+    username: row.username,
+    fullName: row.full_name,
+    plan: row.plan ?? "free",
+    isExempt: Boolean(row.is_exempt),
+    proExpiresAt: row.pro_expires_at,
+    status: row.status,
+    createdAt: row.created_at ?? "",
+    cardCount: row.card_count ?? 0,
+  };
 }
 
+/**
+ * Dashboard stats — one RPC call (admin_dashboard_stats) plus one 5-row
+ * select for recent signups. Previously 8 round trips + a JS revenue sum
+ * over every successful payment row.
+ */
 export async function getDashboardStats(
   includePayments: boolean
 ): Promise<DashboardStats> {
   const admin = createAdminClient();
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [profiles, cards, payments, revenue, subscriptions, deactivated, authUsers] =
+  const [{ data: rawStats, error: statsError }, { data: recent, error: recentError }] =
     await Promise.all([
-      admin.from("profiles").select("id", { count: "exact", head: true }),
-      admin.from("cards").select("id", { count: "exact", head: true }),
-      includePayments
-        ? admin
-            .from("payments")
-            .select("id", { count: "exact", head: true })
-            .eq("status", "successful")
-            .gte("created_at", since)
-        : Promise.resolve({ count: 0, error: null }),
-      includePayments
-        ? admin
-            .from("payments")
-            .select("amount")
-            .eq("status", "successful")
-            .gte("created_at", since)
-        : Promise.resolve({ data: [], error: null }),
+      admin.rpc("admin_dashboard_stats", { include_payments: includePayments }),
       admin
-        .from("subscriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "active"),
-      admin
-        .from("profiles")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "deactivated"),
-      listAuthUsers(),
+        .from("admin_customer_directory")
+        .select("id, email, created_at")
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .limit(5),
     ]);
 
-  const revenueRows = (revenue.data ?? []) as Array<{ amount: number | string }>;
-  const paymentRevenue30d = revenueRows.reduce(
-    (total, row) => total + Number(row.amount || 0),
-    0
-  );
+  if (statsError) throw statsError;
+  if (recentError) throw recentError;
 
-  const recentSignups = authUsers
-    .slice()
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, 5)
-    .map((user) => ({
-      id: user.id,
-      email: user.email ?? "Unknown email",
-      createdAt: user.created_at,
-    }));
+  const row = ((rawStats ?? []) as Array<Record<string, unknown>>)[0] ?? {};
+  const num = (value: unknown) => Number(value ?? 0);
 
   return {
-    totalUsers: profiles.count ?? 0,
-    activeCards: cards.count ?? 0,
-    payments30d: payments.count ?? 0,
-    paymentRevenue30d,
-    proSubscribers: subscriptions.count ?? 0,
-    deactivatedUsers: deactivated.count ?? 0,
-    recentSignups,
+    totalUsers: num(row.total_users),
+    activeCards: num(row.active_cards),
+    payments30d: num(row.payments_30d),
+    paymentRevenue30d: num(row.payment_revenue_30d),
+    proSubscribers: num(row.pro_subscribers),
+    deactivatedUsers: num(row.deactivated_users),
+    recentSignups: (
+      (recent ?? []) as Array<{
+        id: string;
+        email: string | null;
+        created_at: string | null;
+      }>
+    ).map((signup) => ({
+      id: signup.id,
+      email: signup.email ?? "Unknown email",
+      createdAt: signup.created_at ?? "",
+    })),
   };
 }
 
-export async function getCustomerUsers(search = ""): Promise<CustomerUser[]> {
+export type CustomerPage = {
+  users: CustomerUser[];
+  /** Total matching rows (from Postgres count, not a JS array length). */
+  total: number;
+  page: number;
+  perPage: number;
+};
+
+/**
+ * Paginated, searchable customer list — one query on the directory view.
+ * Search/filter/order/range all execute in Postgres.
+ */
+export async function getCustomerUsers(
+  search = "",
+  page = 1,
+  perPage = CUSTOMERS_PER_PAGE
+): Promise<CustomerPage> {
   const admin = createAdminClient();
-  const authUsers = await listAuthUsers();
-  const authById = new Map(authUsers.map((user) => [user.id, user]));
-  const ids = authUsers.map((user) => user.id);
 
-  if (ids.length === 0) return [];
+  const safePage = Math.max(1, Math.trunc(page) || 1);
+  const safePerPage = Math.min(
+    CUSTOMERS_PER_PAGE_MAX,
+    Math.max(1, Math.trunc(perPage) || CUSTOMERS_PER_PAGE)
+  );
 
-  const [{ data: profiles, error: profilesError }, { data: cards, error: cardsError }] =
-    await Promise.all([
-      admin
-        .from("profiles")
-        .select(
-          "id, username, full_name, plan, is_exempt, pro_expires_at, status"
-        )
-        .in("id", ids),
-      admin.from("cards").select("owner_id").in("owner_id", ids),
-    ]);
+  const filter = buildCustomerSearchFilter(search);
+  let query = admin
+    .from("admin_customer_directory")
+    .select("*", { count: "exact" });
+  if (filter) query = query.or(filter);
 
-  if (profilesError) throw profilesError;
-  if (cardsError) throw cardsError;
-
-  const cardCounts = countByOwner(cards as Array<{ owner_id: string }>);
-  const normalizedSearch = search.trim().toLowerCase();
-
-  return ((profiles ?? []) as ProfileRow[])
-    .map((profile) => {
-      const authUser = authById.get(profile.id);
-      return {
-        id: profile.id,
-        email: authUser?.email ?? "Unknown email",
-        username: profile.username,
-        fullName: profile.full_name,
-        plan: profile.plan ?? "free",
-        isExempt: Boolean(profile.is_exempt),
-        proExpiresAt: profile.pro_expires_at,
-        status: isAuthUserBanned(authUser)
-          ? "suspended"
-          : profile.status === "deactivated"
-            ? "deactivated"
-            : "active",
-        createdAt: authUser?.created_at ?? "",
-        cardCount: cardCounts.get(profile.id) ?? 0,
-      } satisfies CustomerUser;
-    })
-    .filter((user) => {
-      if (!normalizedSearch) return true;
-      return [user.email, user.username, user.fullName, user.id]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(normalizedSearch));
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export async function getCustomerUser(id: string): Promise<CustomerUser | null> {
-  const users = await getCustomerUsers();
-  return users.find((user) => user.id === id) ?? null;
-}
-
-export async function getAdminAccounts(): Promise<AdminAccount[]> {
-  const admin = createAdminClient();
-  const [{ data, error }, authUsers] = await Promise.all([
-    admin
-      .from("admin_users")
-      .select(
-        "id, user_id, status, invited_at, created_at, role:admin_roles(id, name, display_name)"
-      )
-      .order("created_at", { ascending: false }),
-    listAuthUsers(),
-  ]);
+  const { data, error, count } = await query
+    .order("created_at", { ascending: false, nullsFirst: false })
+    .range((safePage - 1) * safePerPage, safePage * safePerPage - 1);
 
   if (error) throw error;
-  const authById = new Map(authUsers.map((user) => [user.id, user]));
 
-  return (data ?? []).map((row) => {
-    const role = row.role as unknown as AdminRole;
-    return {
-      id: row.id,
-      userId: row.user_id,
-      email: authById.get(row.user_id)?.email ?? "Unknown email",
-      role,
-      status: row.status as AdminAccount["status"],
-      invitedAt: row.invited_at,
-      createdAt: row.created_at,
-    };
-  });
+  return {
+    users: ((data ?? []) as DirectoryRow[]).map(toCustomerUser),
+    total: count ?? 0,
+    page: safePage,
+    perPage: safePerPage,
+  };
+}
+
+/**
+ * Single customer by profile id — ONE row fetched (previously the entire
+ * user base was loaded to find one user).
+ */
+export async function getCustomerUser(id: string): Promise<CustomerUser | null> {
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("admin_customer_directory")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? toCustomerUser(data as DirectoryRow) : null;
+}
+
+/**
+ * Admin accounts with emails — one query on admin_admin_directory
+ * (previously admin_users + the entire auth user list).
+ */
+export async function getAdminAccounts(): Promise<AdminAccount[]> {
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("admin_admin_directory")
+    .select(
+      "id, user_id, email, role_id, role_name, role_display_name, status, invited_at, created_at"
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    user_id: string;
+    email: string | null;
+    role_id: string;
+    role_name: string;
+    role_display_name: string;
+    status: AdminAccount["status"];
+    invited_at: string | null;
+    created_at: string;
+  };
+
+  return ((data ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    email: row.email ?? "Unknown email",
+    role: {
+      id: row.role_id,
+      name: row.role_name,
+      display_name: row.role_display_name,
+    },
+    status: row.status,
+    invitedAt: row.invited_at,
+    createdAt: row.created_at,
+  }));
 }
 
 export async function getAdminRoles(): Promise<AdminRole[]> {
@@ -257,44 +286,60 @@ export async function getAdminRoles(): Promise<AdminRole[]> {
   return (data ?? []) as AdminRole[];
 }
 
-export async function getAuditLogs(limit = 100): Promise<AuditLog[]> {
-  const admin = createAdminClient();
-  const [{ data, error }, authUsers] = await Promise.all([
-    admin
-      .from("admin_audit_logs")
-      .select("id, action, target_type, target_id, metadata, created_at, admin_id")
+/**
+ * Recent audit log entries with admin emails, newest first — one query on
+ * admin_audit_directory. Optional substring filters keep the filtering in
+ * Postgres. Returns [] (logged, non-fatal) if the view isn't deployed yet.
+ */
+export async function getAuditLogs(options?: {
+  limit?: number;
+  action?: string;
+  admin?: string;
+}): Promise<AuditLog[]> {
+  try {
+    const admin = createAdminClient();
+    const limit = Math.min(500, Math.max(1, options?.limit ?? 100));
+
+    let query = admin
+      .from("admin_audit_directory")
+      .select(
+        "id, action, target_type, target_id, metadata, created_at, admin_email"
+      )
       .order("created_at", { ascending: false })
-      .limit(limit),
-    listAuthUsers(),
-  ]);
+      .limit(limit);
 
-  if (error) throw error;
+    const actionTerm = sanitizeSearchTerm(options?.action);
+    if (actionTerm) query = query.ilike("action", `%${actionTerm}%`);
+    const adminTerm = sanitizeSearchTerm(options?.admin);
+    if (adminTerm) query = query.ilike("admin_email", `%${adminTerm}%`);
 
-  const adminIds = [...new Set((data ?? []).map((row) => row.admin_id))];
-  if (adminIds.length === 0) return [];
+    const { data, error } = await query;
+    if (error) {
+      logger.warn("admin/data", "audit directory read failed", error.message);
+      return [];
+    }
 
-  const { data: adminRows, error: adminError } = await admin
-    .from("admin_users")
-    .select("id, user_id")
-    .in("id", adminIds);
-  if (adminError) throw adminError;
+    type Row = {
+      id: string;
+      action: string;
+      target_type: string | null;
+      target_id: string | null;
+      metadata: Record<string, unknown> | null;
+      created_at: string;
+      admin_email: string | null;
+    };
 
-  const userIdByAdminId = new Map(
-    (adminRows ?? []).map((row) => [row.id, row.user_id])
-  );
-  const emailByUserId = new Map(
-    authUsers.map((user) => [user.id, user.email ?? "Unknown email"])
-  );
-
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    action: row.action,
-    targetType: row.target_type,
-    targetId: row.target_id,
-    metadata: (row.metadata ?? {}) as Record<string, unknown>,
-    createdAt: row.created_at,
-    adminEmail:
-      emailByUserId.get(userIdByAdminId.get(row.admin_id) ?? "") ??
-      "Unknown email",
-  }));
+    return ((data ?? []) as Row[]).map((row) => ({
+      id: row.id,
+      action: row.action,
+      targetType: row.target_type,
+      targetId: row.target_id,
+      metadata: row.metadata ?? {},
+      createdAt: row.created_at,
+      adminEmail: row.admin_email ?? "Unknown email",
+    }));
+  } catch (err) {
+    logger.warn("admin/data", "getAuditLogs error (non-fatal)", err);
+    return [];
+  }
 }

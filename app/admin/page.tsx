@@ -23,7 +23,6 @@ export default async function AdminDashboardPage() {
             current state of the platform.
           </p>
         </div>
-        <p className="text-xs text-zinc-500">Updated just now</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

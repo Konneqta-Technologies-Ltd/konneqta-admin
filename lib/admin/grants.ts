@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 
 /**
  * Complimentary Pro grants — grant/revoke Pro without payment.
@@ -128,7 +129,7 @@ export async function grantPro(input: {
     .eq("id", profile.id);
 
   if (updateError) {
-    console.error("[grants] profile update failed:", updateError);
+    logger.error("grants", "profile update failed", updateError);
     return { ok: false, status: 500, error: "Unable to update the plan. Try again." };
   }
 
@@ -144,7 +145,7 @@ export async function grantPro(input: {
       note,
     });
   if (grantError) {
-    console.error("[grants] pro_grants insert failed:", grantError);
+    logger.error("grants", "pro_grants insert failed", grantError);
   }
 
   const { error: auditError } = await admin.from("admin_audit_logs").insert({
@@ -155,7 +156,7 @@ export async function grantPro(input: {
     metadata: { days, note, expires_at: expiresAt, extended },
   });
   if (auditError) {
-    console.error("[grants] audit log insert failed:", auditError);
+    logger.error("grants", "audit log insert failed", auditError);
   }
 
   return {
@@ -223,7 +224,7 @@ export async function revokePro(input: {
     .eq("id", profile.id);
 
   if (updateError) {
-    console.error("[grants] downgrade failed:", updateError);
+    logger.error("grants", "downgrade failed", updateError);
     return { ok: false, status: 500, error: "Unable to downgrade. Try again." };
   }
 
@@ -234,7 +235,7 @@ export async function revokePro(input: {
     .eq("user_id", profile.id)
     .is("revoked_at", null);
   if (grantsError) {
-    console.error("[grants] marking grants revoked failed:", grantsError);
+    logger.error("grants", "marking grants revoked failed", grantsError);
   }
 
   const { error: auditError } = await admin.from("admin_audit_logs").insert({
@@ -245,7 +246,7 @@ export async function revokePro(input: {
     metadata: {},
   });
   if (auditError) {
-    console.error("[grants] audit log insert failed:", auditError);
+    logger.error("grants", "audit log insert failed", auditError);
   }
 
   return { ok: true };
@@ -276,12 +277,12 @@ export async function listGrants(options?: {
 
     const { data, error } = await query;
     if (error) {
-      console.warn("[grants] listGrants failed:", error.message);
+      logger.warn("grants", "listGrants failed", error.message);
       return [];
     }
     return (data ?? []) as ProGrantRow[];
   } catch (err) {
-    console.warn("[grants] listGrants error (non-fatal):", err);
+    logger.warn("grants", "listGrants error (non-fatal)", err);
     return [];
   }
 }

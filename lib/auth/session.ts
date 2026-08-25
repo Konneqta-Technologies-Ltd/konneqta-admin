@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -39,50 +41,53 @@ export type AdminSession = {
  * caller's own row. If you tighten RLS to service-role-only, switch this
  * function to use createAdminClient() from lib/supabase/admin.
  */
-export async function getAdminUser(): Promise<AdminSession | null> {
-  const supabase = await createClient();
+export const getAdminUser = cache(
+  async function getAdminUser(): Promise<AdminSession | null> {
+    const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  if (!user) return null;
+    if (!user) return null;
 
-  // Look up the admin_users row for this auth user. RLS ensures a user
-  // can only read their own row (if one exists).
-  const { data: adminUser } = await supabase
-    .from("admin_users")
-    .select(
+    // Look up the admin_users row for this auth user. RLS ensures a user
+    // can only read their own row (if one exists).
+    const { data: adminUser } = await supabase
+      .from("admin_users")
+      .select(
+        `
+        id,
+        role_id,
+        status,
+        role:admin_roles (
+          name,
+          display_name
+        )
       `
-      id,
-      role_id,
-      status,
-      role:admin_roles (
-        name,
-        display_name
       )
-    `
-    )
-    .eq("user_id", user.id)
-    .maybeSingle();
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-  return {
-    userId: user.id,
-    email: user.email ?? "",
-    admin: adminUser
-      ? {
-          id: adminUser.id,
-          role_id: adminUser.role_id,
-          status: adminUser.status as "active" | "suspended" | "revoked",
-          role: {
-            name: (adminUser.role as unknown as { name: string }).name,
-            display_name: (adminUser.role as unknown as { display_name: string })
-              .display_name,
-          },
-        }
-      : null,
-  };
-}
+    return {
+      userId: user.id,
+      email: user.email ?? "",
+      admin: adminUser
+        ? {
+            id: adminUser.id,
+            role_id: adminUser.role_id,
+            status: adminUser.status as "active" | "suspended" | "revoked",
+            role: {
+              name: (adminUser.role as unknown as { name: string }).name,
+              display_name: (adminUser.role as unknown as {
+                display_name: string;
+              }).display_name,
+            },
+          }
+        : null,
+    };
+  }
+);
 
 /**
  * Convenience: is the current user an active admin?

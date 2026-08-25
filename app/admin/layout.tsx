@@ -55,13 +55,12 @@ export default async function AdminLayout({
               height={32}
               className="h-8 w-8 rounded-lg"
             />
-            <span className="text-sm font-semibold">Konneqta Admin</span>
           </div>
           <div className="hidden md:block" />
 
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium leading-tight">
+              <p className="hidden text-sm font-medium leading-tight md:block">
                 {session.email}
               </p>
               <p className="text-xs leading-tight text-zinc-400">

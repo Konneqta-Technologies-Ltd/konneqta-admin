@@ -76,6 +76,47 @@ create index if not exists idx_admin_audit_logs_admin_id on public.admin_audit_l
 create index if not exists idx_admin_audit_logs_created_at on public.admin_audit_logs (created_at desc);
 
 -- ---------------------------------------------------------------------------
+-- 1b. Privileged customer-management RPCs
+-- ---------------------------------------------------------------------------
+-- These functions let the admin app update customer auth/profile state without
+-- exposing the service-role key. They are callable only by service_role.
+-- Suspension is stored in auth.users.banned_until and can only be changed by
+-- the server-side service role through this restricted SECURITY DEFINER RPC.
+
+create or replace function public.admin_set_user_suspension(
+  target_user_id uuid,
+  should_suspend boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if should_suspend then
+    update auth.users
+    set banned_until = '9999-12-31 23:59:59+00'::timestamptz,
+        updated_at = now()
+    where id = target_user_id;
+  else
+    update auth.users
+    set banned_until = null,
+        updated_at = now()
+    where id = target_user_id;
+  end if;
+
+  if not found then
+    raise exception 'Auth user not found';
+  end if;
+end;
+$$;
+
+revoke all on function public.admin_set_user_suspension(uuid, boolean) from public;
+revoke all on function public.admin_set_user_suspension(uuid, boolean) from anon;
+revoke all on function public.admin_set_user_suspension(uuid, boolean) from authenticated;
+grant execute on function public.admin_set_user_suspension(uuid, boolean) to service_role;
+
+-- ---------------------------------------------------------------------------
 -- 2. updated_at trigger for admin_users
 -- ---------------------------------------------------------------------------
 
@@ -226,4 +267,68 @@ on conflict do nothing;
 --   from public.admin_users au
 --   join auth.users u on u.id = au.user_id
 --   join public.admin_roles r on r.id = au.role_id;
+
+-- ============================================================================
+-- 6. COMPLIMENTARY PRO GRANTS ("grant Pro without payment")
+-- ============================================================================
+-- Adds the `users.grant_pro` permission and the `pro_grants` audit table
+-- behind the /admin/users/[id] "Pro access" panel and /admin/grants page.
+--
+-- The grant itself just writes profiles.plan / profiles.pro_expires_at with
+-- the service role (the customer app's protect_entitlements trigger allows
+-- exactly that role), and the customer app's lazy isPro() expiry drops the
+-- user back to free the moment the timestamp passes — no cron needed.
+-- ============================================================================
+
+-- Permission (super_admin picks it up automatically via the cross-join seed
+-- above when this script is re-run; the day-to-day 'admin' role does NOT get
+-- it by default because comp access is monetisation-sensitive. To enable it
+-- for regular admins, run:
+--   insert into public.admin_role_permissions (role_id, permission_id)
+--   select r.id, p.id from public.admin_roles r, public.admin_permissions p
+--   where r.name = 'admin' and p.name = 'users.grant_pro'
+--   on conflict do nothing;)
+insert into public.admin_permissions (name, description) values
+  ('users.grant_pro', 'Grant or revoke complimentary Pro access')
+on conflict (name) do nothing;
+
+create table if not exists public.pro_grants (
+    id          uuid primary key default gen_random_uuid(),
+
+    -- The customer receiving the complimentary Pro access (profiles.id).
+    user_id     uuid not null references public.profiles(id) on delete cascade,
+
+    -- The admin_users row that granted it. SET NULL so deleting an admin
+    -- account preserves the grant history.
+    granted_by  uuid references public.admin_users(id) on delete set null,
+
+    -- Username snapshot at grant time (survives renames / deletion).
+    username    text not null,
+
+    -- How many days were granted (1 .. 3650 = 10 years).
+    days        integer not null check (days > 0 and days <= 3650),
+
+    -- When this grant's Pro access ends (mirrors profiles.pro_expires_at).
+    expires_at  timestamptz not null,
+
+    -- Free-form reason: "giveaway winner", "beta tester", "goodwill"…
+    note        text,
+
+    -- Filled when an admin revokes early. Same lazy model as elsewhere:
+    -- revoked_at IS NULL and expires_at > now() means "currently active".
+    revoked_at  timestamptz,
+    revoked_by  uuid references public.admin_users(id) on delete set null,
+
+    created_at  timestamptz not null default now()
+);
+
+create index if not exists pro_grants_user_idx    on public.pro_grants (user_id);
+create index if not exists pro_grants_expires_idx on public.pro_grants (expires_at);
+create index if not exists pro_grants_created_idx on public.pro_grants (created_at desc);
+
+-- RLS: service-role only (every read/write in this admin app goes through
+-- lib/supabase/admin.ts), so NO anon/authenticated policies are created.
+alter table public.pro_grants enable row level security;
+-- ============================================================================
+
 -- ============================================================================

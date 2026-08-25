@@ -1,5 +1,6 @@
+import { AdminNav } from "./admin-nav";
 import { LogoutButton } from "./logout-button";
-import { requireAdmin } from "@/lib/auth/guard";
+import { hasPermission, requireAdmin } from "@/lib/auth/guard";
 
 /**
  * Dashboard layout — server-side admin gate.
@@ -13,6 +14,8 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const session = await requireAdmin();
+  const isSuperAdmin = session.admin?.role.name === "super_admin";
+  const canGrantPro = await hasPermission(session, "users.grant_pro");
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-white">
@@ -32,28 +35,7 @@ export default async function AdminLayout({
           </span>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 p-3">
-          {/* Phase 1: dashboard only. /admin/users etc. arrive in Phase 2. */}
-          <span className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-            Overview
-          </span>
-          <span className="rounded-lg bg-zinc-800 px-3 py-2 text-sm font-medium text-white">
-            Dashboard
-          </span>
-
-          <span className="mt-4 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-            Management
-          </span>
-          <span className="rounded-lg px-3 py-2 text-sm text-zinc-600">
-            Users (soon)
-          </span>
-          <span className="rounded-lg px-3 py-2 text-sm text-zinc-600">
-            Admins (soon)
-          </span>
-          <span className="rounded-lg px-3 py-2 text-sm text-zinc-600">
-            Audit log (soon)
-          </span>
-        </nav>
+        <AdminNav isSuperAdmin={isSuperAdmin} canGrantPro={canGrantPro} />
 
         <div className="border-t border-zinc-800 p-3">
           <LogoutButton />
@@ -94,6 +76,12 @@ export default async function AdminLayout({
             </div>
           </div>
         </header>
+
+        <AdminNav
+          isSuperAdmin={isSuperAdmin}
+          canGrantPro={canGrantPro}
+          mobile
+        />
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-6">{children}</main>

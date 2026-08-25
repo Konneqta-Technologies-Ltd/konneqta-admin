@@ -292,6 +292,16 @@ insert into public.admin_permissions (name, description) values
   ('users.grant_pro', 'Grant or revoke complimentary Pro access')
 on conflict (name) do nothing;
 
+-- Link it to super_admin EXPLICITLY. The section-4 cross-join seed above
+-- runs BEFORE this section in a first pass, so it cannot pick this
+-- permission up on its own — this insert closes that gap (idempotent).
+insert into public.admin_role_permissions (role_id, permission_id)
+select r.id, p.id
+from public.admin_roles r
+cross join public.admin_permissions p
+where r.name = 'super_admin' and p.name = 'users.grant_pro'
+on conflict do nothing;
+
 create table if not exists public.pro_grants (
     id          uuid primary key default gen_random_uuid(),
 

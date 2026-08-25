@@ -76,6 +76,10 @@ export async function requireAdminApi(): Promise<
  * Checks whether the active admin's role has a given permission
  * (e.g. "users.read", "admins.create") via admin_role_permissions.
  *
+ * Super Admin always passes: the role is defined as "Full, unrestricted
+ * access to every admin capability", so it must never be at the mercy of a
+ * missing/stale permission seed row.
+ *
  * Always pair with requireAdminApi() — this function assumes the caller
  * is already verified as an active admin.
  */
@@ -83,6 +87,9 @@ export async function hasPermission(
   session: AdminSession,
   permission: string
 ): Promise<boolean> {
+  // Super Admin bypasses every permission check.
+  if (session.admin?.role.name === "super_admin") return true;
+
   // Import lazily to avoid cycles; createAdminClient is server-only.
   const { createAdminClient } = await import("@/lib/supabase/admin");
 

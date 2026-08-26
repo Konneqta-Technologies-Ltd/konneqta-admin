@@ -7,6 +7,7 @@ const links = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/grants", label: "Pro grants", grantPermissionOnly: true },
+  { href: "/admin/promos", label: "Promo codes", promoPermissionOnly: true },
   { href: "/admin/admins", label: "Admins", superAdminOnly: true },
   { href: "/admin/audit", label: "Audit log" },
 ];
@@ -14,10 +15,12 @@ const links = [
 export function AdminNav({
   isSuperAdmin,
   canGrantPro = false,
+  canManagePromos = false,
   mobile = false,
 }: {
   isSuperAdmin: boolean;
   canGrantPro?: boolean;
+  canManagePromos?: boolean;
   mobile?: boolean;
 }) {
   const pathname = usePathname();
@@ -39,6 +42,7 @@ export function AdminNav({
       {links.map((link) => {
         if (link.superAdminOnly && !isSuperAdmin) return null;
         if (link.grantPermissionOnly && !canGrantPro) return null;
+        if (link.promoPermissionOnly && !canManagePromos) return null;
         const active =
           link.href === "/admin"
             ? pathname === "/admin"

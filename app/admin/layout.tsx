@@ -16,6 +16,7 @@ export default async function AdminLayout({
   const session = await requireAdmin();
   const isSuperAdmin = session.admin?.role.name === "super_admin";
   const canGrantPro = await hasPermission(session, "users.grant_pro");
+  const canManagePromos = await hasPermission(session, "promos.manage");
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-white">
@@ -35,7 +36,11 @@ export default async function AdminLayout({
           </span>
         </div>
 
-        <AdminNav isSuperAdmin={isSuperAdmin} canGrantPro={canGrantPro} />
+        <AdminNav
+          isSuperAdmin={isSuperAdmin}
+          canGrantPro={canGrantPro}
+          canManagePromos={canManagePromos}
+        />
 
         <div className="border-t border-zinc-800 p-3">
           <LogoutButton />
@@ -79,6 +84,7 @@ export default async function AdminLayout({
         <AdminNav
           isSuperAdmin={isSuperAdmin}
           canGrantPro={canGrantPro}
+          canManagePromos={canManagePromos}
           mobile
         />
 

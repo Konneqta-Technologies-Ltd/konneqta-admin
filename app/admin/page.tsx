@@ -48,7 +48,7 @@ export default async function AdminDashboardPage() {
         <StatCard
           label="Pro subscribers"
           value={stats.proSubscribers.toLocaleString()}
-          note="Active subscriptions"
+          note="Currently on Pro (unexpired or exempt)"
         />
       </div>
 

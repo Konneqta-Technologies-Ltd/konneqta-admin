@@ -122,7 +122,12 @@ as $$
         where pay.status = 'successful'
           and pay.created_at >= now() - interval '30 days')
     else 0::numeric end                                                     as payment_revenue_30d,
-    (select count(*) from public.subscriptions s where s.status = 'active') as pro_subscribers,
+    -- Effective Pro count — mirrors the customer app's lazy isPro() expiry
+    -- (lib/admin/grants.ts proState): exempt profiles are always Pro;
+    -- otherwise plan = 'pro' only counts while pro_expires_at is unexpired.
+    (select count(*) from public.profiles p
+       where p.is_exempt
+          or (p.plan = 'pro' and p.pro_expires_at > now()))                as pro_subscribers,
     (select count(*) from public.profiles p where p.status = 'deactivated') as deactivated_users;
 $$;
 

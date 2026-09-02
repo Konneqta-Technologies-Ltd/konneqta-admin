@@ -108,6 +108,41 @@ export function buildCustomerSearchFilter(
   return parts.join(",");
 }
 
+/** Plan facet of the users list. `pro`/`free` use EFFECTIVE Pro semantics
+ * (see the admin_customer_directory.is_pro_effective column): a plan='pro'
+ * profile whose pro_expires_at has lapsed counts as Free, exempt always Pro. */
+export const CUSTOMER_PLAN_FILTERS = ["pro", "free", "exempt"] as const;
+export type CustomerPlanFilter = (typeof CUSTOMER_PLAN_FILTERS)[number];
+
+export const CUSTOMER_STATUS_FILTERS = [
+  "active",
+  "deactivated",
+  "suspended",
+] as const;
+export type CustomerStatusFilter = (typeof CUSTOMER_STATUS_FILTERS)[number];
+
+/** Validated plan/status facets for the users list. Anything unrecognised
+ * (or "all") falls back to null = no filter, so URLs like ?plan=bogus can
+ * never widen or break the underlying PostgREST query. */
+export function buildCustomerUserFilters(
+  plan?: string | null,
+  status?: string | null
+): {
+  plan: CustomerPlanFilter | null;
+  status: CustomerStatusFilter | null;
+} {
+  return {
+    plan:
+      plan && (CUSTOMER_PLAN_FILTERS as readonly string[]).includes(plan)
+        ? (plan as CustomerPlanFilter)
+        : null,
+    status:
+      status && (CUSTOMER_STATUS_FILTERS as readonly string[]).includes(status)
+        ? (status as CustomerStatusFilter)
+        : null,
+  };
+}
+
 function toCustomerUser(row: DirectoryRow): CustomerUser {
   return {
     id: row.id,
@@ -180,12 +215,18 @@ export type CustomerPage = {
 
 /**
  * Paginated, searchable customer list — one query on the directory view.
- * Search/filter/order/range all execute in Postgres.
+ * Search/filter/order/range all execute in Postgres. Optional plan/status
+ * facets are validated by buildCustomerUserFilters; `pro`/`free` filter on
+ * the view's is_pro_effective column (effective Pro NOW, not the raw plan).
  */
 export async function getCustomerUsers(
   search = "",
   page = 1,
-  perPage = CUSTOMERS_PER_PAGE
+  perPage = CUSTOMERS_PER_PAGE,
+  filters?: {
+    plan?: CustomerPlanFilter | null;
+    status?: CustomerStatusFilter | null;
+  }
 ): Promise<CustomerPage> {
   const admin = createAdminClient();
 
@@ -200,6 +241,21 @@ export async function getCustomerUsers(
     .from("admin_customer_directory")
     .select("*", { count: "exact" });
   if (filter) query = query.or(filter);
+
+  switch (filters?.plan) {
+    case "pro":
+      query = query.eq("is_pro_effective", true);
+      break;
+    case "free":
+      query = query.eq("is_pro_effective", false);
+      break;
+    case "exempt":
+      query = query.eq("is_exempt", true);
+      break;
+  }
+  if (filters?.status) {
+    query = query.eq("status", filters.status);
+  }
 
   const { data, error, count } = await query
     .order("created_at", { ascending: false, nullsFirst: false })

@@ -2,14 +2,34 @@ import { hasPermission, requireAdmin } from "@/lib/auth/guard";
 
 import Link from "next/link";
 import { formatDate } from "../format";
-import { grantState, listGrants } from "@/lib/admin/grants";
+import {
+  grantState,
+  GRANT_STATUS_FILTERS,
+  listGrants,
+  type GrantStatusFilter,
+} from "@/lib/admin/grants";
 
-export default async function AdminGrantsPage() {
+export default async function AdminGrantsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
   const session = await requireAdmin();
   const canRead = await hasPermission(session, "users.grant_pro");
   if (!canRead) return <AccessDenied />;
 
-  const grants = await listGrants({ limit: 100 });
+  const params = await searchParams;
+  // Allow-listed facet - anything bogus is ignored (no filter).
+  const statusFilter = (
+    GRANT_STATUS_FILTERS as readonly string[]
+  ).includes(params.status ?? "")
+    ? (params.status as GrantStatusFilter)
+    : null;
+
+  const grants = await listGrants({
+    limit: 100,
+    status: statusFilter ?? undefined,
+  });
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -25,6 +45,35 @@ export default async function AdminGrantsPage() {
           a customer&apos;s profile page.
         </p>
       </div>
+
+      {/* Status filter for the grants table. */}
+      <form
+        action="/admin/grants"
+        className="mt-6 flex flex-wrap items-center gap-2"
+      >
+        <select
+          name="status"
+          defaultValue={statusFilter ?? ""}
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-400"
+          aria-label="Filter grants by status"
+        >
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="expired">Expired</option>
+          <option value="revoked">Revoked</option>
+        </select>
+        <button className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-zinc-200">
+          Filter
+        </button>
+        {statusFilter && (
+          <Link
+            href="/admin/grants"
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
+          >
+            Clear
+          </Link>
+        )}
+      </form>
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="border-b border-zinc-800 px-5 py-4 text-sm text-zinc-400">

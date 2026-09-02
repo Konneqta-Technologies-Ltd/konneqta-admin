@@ -14,6 +14,7 @@
 --   admin_customer_directory      profiles + auth email + card count + status
 --   admin_admin_directory         admin accounts joined with emails
 --   admin_audit_directory         audit log joined with admin emails
+--   admin_promo_redemptions       promo redemptions joined with redeemer identity
 --   admin_dashboard_stats()       every dashboard count + revenue SUM, one call
 --   admin_find_auth_user_id_by_email()  replaces the auth.admin.listUsers scan
 --   admin_set_customer_suspension()     ATOMIC suspend/unsuspend incl.
@@ -49,7 +50,17 @@ select
   u.created_at                                     as created_at,
   (select count(*)
      from public.cards c
-    where c.owner_id = p.id)                       as card_count
+    where c.owner_id = p.id)                       as card_count,
+  -- Effective Pro NOW - NEW COLUMN MUST STAY LAST: create or replace view
+  -- can only APPEND columns; inserting mid-list (e.g. before status) fails
+  -- with 42P16 cannot change name of view column. Mirrors the customer
+  -- app lazy isPro() expiry and admin_dashboard_stats pro_subscribers:
+  -- exempt always; plan = pro only while pro_expires_at is unexpired.
+  -- Lets the users list filter who is on Pro right now with a plain .eq()
+  -- instead of PostgREST or-composition that clashes with the search filter.
+  (p.is_exempt
+     or (coalesce(p.plan, 'free') = 'pro'
+         and p.pro_expires_at > now()))            as is_pro_effective
 from public.profiles p
 left join auth.users u on u.id = p.id;
 
@@ -89,6 +100,31 @@ select
 from public.admin_audit_logs l
 join public.admin_users au on au.id = l.admin_id
 left join auth.users u on u.id = au.user_id;
+
+-- ---------------------------------------------------------------------------
+-- 3b. Promo redemptions view — "who redeemed which code"
+-- ---------------------------------------------------------------------------
+-- NOTE: public.promo_codes and public.promo_redemptions are created by the
+-- CUSTOMER app's migration (konneqta/supabase/promo-codes-setup.sql). This
+-- view joins each redemption to the redeemer's identity so the admin promos
+-- page can drill into a code with ONE query. code_snapshot is denormalised
+-- on the redemption row by the customer RPC, so it stays correct even if the
+-- code row is later deleted. LEFT JOINs keep orphaned rows (profile or code
+-- deleted) visible instead of silently dropping them.
+create or replace view public.admin_promo_redemptions as
+select
+  pr.id                                            as id,
+  pr.promo_code_id                                 as promo_code_id,
+  pr.code_snapshot                                 as code,
+  pr.days_granted                                  as days_granted,
+  pr.created_at                                    as redeemed_at,
+  pr.user_id                                       as user_id,
+  u.email                                          as email,
+  p.username                                       as username,
+  p.full_name                                      as full_name
+from public.promo_redemptions pr
+left join public.profiles p on p.id = pr.user_id
+left join auth.users u on u.id = pr.user_id;
 
 -- ---------------------------------------------------------------------------
 -- 4. Dashboard stats — one call instead of 7 queries + a JS revenue sum
@@ -281,6 +317,9 @@ grant  select on public.admin_admin_directory to service_role;
 
 revoke all on public.admin_audit_directory from public, anon, authenticated;
 grant  select on public.admin_audit_directory to service_role;
+
+revoke all on public.admin_promo_redemptions from public, anon, authenticated;
+grant  select on public.admin_promo_redemptions to service_role;
 
 revoke all on function public.admin_dashboard_stats(boolean)
   from public, anon, authenticated;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   sanitizeSearchTerm,
   buildCustomerSearchFilter,
+  buildCustomerUserFilters,
   CUSTOMERS_PER_PAGE,
 } from "@/lib/admin/data";
 
@@ -54,5 +55,48 @@ describe("pagination defaults", () => {
   it("keeps the page size within sane bounds", () => {
     expect(CUSTOMERS_PER_PAGE).toBeGreaterThan(0);
     expect(CUSTOMERS_PER_PAGE).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("buildCustomerUserFilters", () => {
+  it("accepts every allow-listed plan value", () => {
+    for (const plan of ["pro", "free", "exempt"] as const) {
+      expect(buildCustomerUserFilters(plan, null)).toEqual({
+        plan,
+        status: null,
+      });
+    }
+  });
+
+  it("accepts every allow-listed status value", () => {
+    for (const status of [
+      "active",
+      "deactivated",
+      "suspended",
+    ] as const) {
+      expect(buildCustomerUserFilters(null, status)).toEqual({
+        plan: null,
+        status,
+      });
+    }
+  });
+
+  it("returns no filters for empty, all, or undefined values", () => {
+    expect(buildCustomerUserFilters()).toEqual({ plan: null, status: null });
+    expect(buildCustomerUserFilters("", "")).toEqual({
+      plan: null,
+      status: null,
+    });
+    expect(buildCustomerUserFilters("all", "all")).toEqual({
+      plan: null,
+      status: null,
+    });
+  });
+
+  it("ignores unrecognised values so URLs cannot widen the query", () => {
+    expect(buildCustomerUserFilters("bogus", "hacked")).toEqual({
+      plan: null,
+      status: null,
+    });
   });
 });

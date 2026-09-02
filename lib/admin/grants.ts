@@ -257,12 +257,18 @@ export async function revokePro(input: {
  * for the global /admin/grants page. Returns [] when the table isn't created
  * yet so both pages degrade to an empty list instead of crashing.
  */
+/** Allow-listed ?status= values for the grants page. */
+export const GRANT_STATUS_FILTERS = ["active", "expired", "revoked"] as const;
+export type GrantStatusFilter = (typeof GRANT_STATUS_FILTERS)[number];
+
 export async function listGrants(options?: {
   userId?: string;
   limit?: number;
+  status?: GrantStatusFilter;
 }): Promise<ProGrantRow[]> {
   try {
     const admin = createAdminClient();
+    const now = new Date().toISOString();
     let query = admin
       .from("pro_grants")
       .select(
@@ -273,6 +279,19 @@ export async function listGrants(options?: {
 
     if (options?.userId) {
       query = query.eq("user_id", options.userId);
+    }
+
+    // Mirrors grantState() precedence: Revoked > Expired > Active.
+    switch (options?.status) {
+      case "revoked":
+        query = query.not("revoked_at", "is", null);
+        break;
+      case "active":
+        query = query.is("revoked_at", null).gt("expires_at", now);
+        break;
+      case "expired":
+        query = query.is("revoked_at", null).lte("expires_at", now);
+        break;
     }
 
     const { data, error } = await query;

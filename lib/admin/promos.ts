@@ -37,6 +37,15 @@ export type PromoState =
   | "Fully redeemed"
   | "Disabled";
 
+/** Every PromoState value — the allow-list for the ?status= query param. */
+export const PROMO_STATUSES: readonly PromoState[] = [
+  "Active",
+  "Scheduled",
+  "Expired",
+  "Fully redeemed",
+  "Disabled",
+];
+
 /**
  * Lifecycle label for a code row. Pure + testable (optional `now` param so
  * tests don't depend on the clock). Kept OUTSIDE components per the admin
@@ -237,9 +246,14 @@ export async function togglePromo(input: {
  * All codes, newest first. Returns [] when the table doesn't exist yet (the
  * migration hasn't been run) so the page degrades to an empty list instead
  * of crashing — same convention as listGrants().
+ *
+ * status filters by the DERIVED lifecycle label (promoState) - it is not a
+ * stored column, so the check runs app-side over the fetched (limit) rows;
+ * everything else (order/limit) still executes in Postgres.
  */
 export async function listPromos(options?: {
   limit?: number;
+  status?: PromoState;
 }): Promise<PromoRow[]> {
   try {
     const admin = createAdminClient();
@@ -255,9 +269,72 @@ export async function listPromos(options?: {
       logger.warn("promos", "listPromos failed", error.message);
       return [];
     }
-    return (data ?? []) as PromoRow[];
+    const rows = (data ?? []) as PromoRow[];
+    return options?.status
+      ? rows.filter((row) => promoState(row) === options.status)
+      : rows;
   } catch (err) {
     logger.warn("promos", "listPromos error (non-fatal)", err);
+    return [];
+  }
+}
+
+/** Row shape of the admin_promo_redemptions view (supabase/admin-data-views.sql). */
+export type PromoRedemptionRow = {
+  id: string;
+  promo_code_id: string;
+  code: string;
+  days_granted: number;
+  redeemed_at: string;
+  user_id: string;
+  email: string | null;
+  username: string | null;
+  full_name: string | null;
+};
+
+/**
+ * Validated ?code= facet for the redemptions drill-down. Codes are stored
+ * uppercase ([A-Z0-9_]{3,30}); anything else is ignored (no filter) so a
+ * bogus URL param can never widen or break the query.
+ */
+export function normalizePromoCodeFilter(
+  code?: string | null
+): string | null {
+  const clean = (code ?? "").trim().toUpperCase();
+  return PROMO_CODE_PATTERN.test(clean) ? clean : null;
+}
+
+/**
+ * Who redeemed what - one query on the admin_promo_redemptions view,
+ * newest first, optionally narrowed to a single code snapshot. Returns []
+ * when the view is not deployed yet (same degrade convention as listPromos).
+ */
+export async function listPromoRedemptions(options?: {
+  code?: string | null;
+  limit?: number;
+}): Promise<PromoRedemptionRow[]> {
+  try {
+    const admin = createAdminClient();
+    const limit = Math.min(500, Math.max(1, options?.limit ?? 100));
+    const code = normalizePromoCodeFilter(options?.code);
+
+    let query = admin
+      .from("admin_promo_redemptions")
+      .select(
+        "id, promo_code_id, code, days_granted, redeemed_at, user_id, email, username, full_name"
+      )
+      .order("redeemed_at", { ascending: false })
+      .limit(limit);
+    if (code) query = query.eq("code", code);
+
+    const { data, error } = await query;
+    if (error) {
+      logger.warn("promos", "listPromoRedemptions failed", error.message);
+      return [];
+    }
+    return (data ?? []) as PromoRedemptionRow[];
+  } catch (err) {
+    logger.warn("promos", "listPromoRedemptions error (non-fatal)", err);
     return [];
   }
 }

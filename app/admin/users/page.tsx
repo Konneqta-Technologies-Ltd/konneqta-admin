@@ -3,12 +3,20 @@ import { hasPermission, requireAdmin } from "@/lib/auth/guard";
 import Link from "next/link";
 import { UserStatusButton } from "./user-actions";
 import { formatDate } from "../format";
-import { getCustomerUsers } from "@/lib/admin/data";
+import {
+  buildCustomerUserFilters,
+  getCustomerUsers,
+} from "@/lib/admin/data";
 
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    plan?: string;
+    status?: string;
+    page?: string;
+  }>;
 }) {
   const session = await requireAdmin();
   const canRead = await hasPermission(session, "users.read");
@@ -16,24 +24,38 @@ export default async function AdminUsersPage({
 
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
+  // Allow-listed facets — anything bogus falls back to "all" (no filter).
+  const { plan: planFilter, status: statusFilter } = buildCustomerUserFilters(
+    params.plan,
+    params.status
+  );
+  const hasFilters = Boolean(query || planFilter || statusFilter);
   const requestedPage = Math.max(
     1,
     Number.parseInt(params.page ?? "1", 10) || 1
   );
   const canUpdate = await hasPermission(session, "users.update");
 
-  let result = await getCustomerUsers(query, requestedPage);
+  let result = await getCustomerUsers(query, requestedPage, undefined, {
+    plan: planFilter,
+    status: statusFilter,
+  });
   // A stale ?page= beyond the last page (e.g. after a search narrowed the
   // results) — clamp to the last real page and re-fetch once.
   const totalPages = Math.max(1, Math.ceil(result.total / result.perPage));
   if (result.page > totalPages) {
-    result = await getCustomerUsers(query, totalPages);
+    result = await getCustomerUsers(query, totalPages, undefined, {
+      plan: planFilter,
+      status: statusFilter,
+    });
   }
   const { users, total, page, perPage } = result;
 
   const pageHref = (target: number) => {
     const search = new URLSearchParams();
     if (query) search.set("q", query);
+    if (planFilter) search.set("plan", planFilter);
+    if (statusFilter) search.set("status", statusFilter);
     if (target > 1) search.set("page", String(target));
     const qs = search.toString();
     return qs ? `/admin/users?${qs}` : "/admin/users";
@@ -54,7 +76,7 @@ export default async function AdminUsersPage({
           </p>
         </div>
         <form
-          className="flex w-full max-w-md gap-2 sm:w-auto"
+          className="flex w-full max-w-xl flex-wrap gap-2 sm:w-auto"
           action="/admin/users"
         >
           <input
@@ -66,13 +88,69 @@ export default async function AdminUsersPage({
             name="q"
             defaultValue={query}
             placeholder="Search email, username, or name"
-            className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-400 sm:w-72"
+            className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-400 sm:w-64"
           />
+          <select
+            name="plan"
+            defaultValue={planFilter ?? ""}
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-400"
+            aria-label="Filter by plan"
+          >
+            <option value="">All plans</option>
+            <option value="pro">Pro (now)</option>
+            <option value="free">Free</option>
+            <option value="exempt">Pro exempt</option>
+          </select>
+          <select
+            name="status"
+            defaultValue={statusFilter ?? ""}
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-400"
+            aria-label="Filter by status"
+          >
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="deactivated">Deactivated</option>
+            <option value="suspended">Suspended</option>
+          </select>
           <button className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-zinc-200">
             Search
           </button>
         </form>
       </div>
+
+      {hasFilters && (
+        <div className="mt-3 flex items-center gap-3 text-sm">
+          <span className="text-zinc-500">
+            Filtered
+            {planFilter && (
+              <>
+                {" — plan: "}
+                <span className="font-medium text-zinc-300">{planFilter}</span>
+              </>
+            )}
+            {statusFilter && (
+              <>
+                {" — status: "}
+                <span className="font-medium text-zinc-300">
+                  {statusFilter}
+                </span>
+              </>
+            )}
+            {query && (
+              <>
+                {" — search: "}
+                <span className="font-medium text-zinc-300">“{query}”</span>
+              </>
+            )}
+          </span>
+          <Link
+            href="/admin/users"
+            className="rounded-lg border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+          >
+            Clear
+          </Link>
+        </div>
+      )}
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="border-b border-zinc-800 px-5 py-4 text-sm text-zinc-400">

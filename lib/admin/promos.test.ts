@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { PROMO_CODE_PATTERN, promoState } from "./promos";
+import {
+  normalizePromoCodeFilter,
+  PROMO_CODE_PATTERN,
+  promoState,
+  PROMO_STATUSES,
+} from "./promos";
 
 /**
  * Unit tests for the pure promo helpers (no DB — mirrors grants.test.ts).
@@ -85,5 +90,31 @@ describe("PROMO_CODE_PATTERN", () => {
     "",
   ])("rejects %s", (code) => {
     expect(PROMO_CODE_PATTERN.test(code)).toBe(false);
+  });
+});
+
+describe("normalizePromoCodeFilter", () => {
+  it("uppercases and accepts a valid code", () => {
+    expect(normalizePromoCodeFilter(" welcome30 \n")).toBe("WELCOME30");
+  });
+
+  it("rejects codes that violate the stored pattern", () => {
+    expect(normalizePromoCodeFilter("NO")).toBeNull();
+    expect(normalizePromoCodeFilter("DROP TABLE;--")).toBeNull();
+    expect(normalizePromoCodeFilter("has space")).toBeNull();
+  });
+
+  it("treats empty or missing input as no filter", () => {
+    expect(normalizePromoCodeFilter(null)).toBeNull();
+    expect(normalizePromoCodeFilter("")).toBeNull();
+    expect(normalizePromoCodeFilter("   ")).toBeNull();
+  });
+});
+
+describe("PROMO_STATUSES", () => {
+  it("covers every PromoState label exactly once", () => {
+    expect(new Set(PROMO_STATUSES).size).toBe(PROMO_STATUSES.length);
+    expect(PROMO_STATUSES).toContain("Active");
+    expect(PROMO_STATUSES).toContain("Disabled");
   });
 });

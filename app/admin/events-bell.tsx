@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+
 import { formatRelativeTime } from "./format";
+import { useRouter } from "next/navigation";
 
 /**
  * Admin bell — polls the platform event feed (GET /api/admin/events) every
@@ -125,7 +126,7 @@ export function EventsBell() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <div className="absolute right-0 top-11 z-50 w-[380px] overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+          <div className="absolute md:right-0 -right-65 top-11 z-50 w-95 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
             <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
               <p className="text-sm font-semibold text-white">Notifications</p>
               <button
@@ -138,7 +139,7 @@ export function EventsBell() {
               </button>
             </div>
 
-            <div className="max-h-[420px] overflow-y-auto">
+            <div className="max-h-105 overflow-y-auto">
               {loading ? (
                 <p className="px-4 py-8 text-center text-sm text-zinc-500">
                   Loading…

@@ -12,6 +12,21 @@ and Tailwind CSS.
 - **Dashboard** — live platform stats (users, cards, payments, Pro subscribers)
 - **Customer users** — server-side search (email / username / name / UUID),
   pagination, suspension with exact pre-suspension-status restore
+- **Referrals** — every signup made with a referral code (signed-up →
+  rewarded / revoked), code + status + date-range filters with quick
+  presets, per-referrer leaderboard, and referral stats on each user's page
+- **Broadcasts** — push notifications to an audience (Everyone / Active /
+  Pro / Free / Suspended / Deactivated, or one user): lands in the app's
+  notification center AND on devices (Web Push for browsers/PWA, Expo Push
+  for iOS/Android), respecting per-user opt-outs, fully audit-logged
+- **Monthly report** — the full platform digest (signups, revenue, Pro
+  conversions/churn, referrals + top referrers, promo redemptions,
+  engagement, admin activity) emailed via ZeptoMail on the 1st by Vercel
+  Cron, previewable for any past month, re-sendable by a Super Admin
+- **Admin bell** — live platform-event feed in the top bar (new signups,
+  payments, referral rewards, grants, promo redemptions, broadcasts,
+  suspensions) with an unread badge, polling the read-only `admin_events`
+  view — no triggers, no writes to the customer app
 - **Complimentary Pro grants** — grant/extend/revoke Pro without payment,
   with stacking expiry windows and a full grant history
 - **Administrators** — invite admins (Supabase invitation email), change
@@ -41,8 +56,14 @@ lib/supabase/server.ts        anon-key server client (respects RLS)
 lib/supabase/client.ts        browser client (login only)
 lib/admin/data.ts             reads via SQL views/RPCs (see DB section)
 lib/admin/grants.ts           complimentary-Pro domain logic
+lib/admin/referrals.ts        referral drill-down reads (view + leaderboard RPC)
+lib/admin/notify.ts           device push senders (Web Push VAPID + Expo Push)
+lib/admin/broadcast.ts        audience resolution + the broadcast pipeline
+lib/admin/monthly-report.ts   digest stats + email/text rendering
+lib/admin/email.ts            ZeptoMail sender (monthly digest)
 app/admin/**                  dashboard pages (server components)
 app/api/admin/**              mutation endpoints (guarded, audited)
+app/api/cron/monthly-report   scheduled digest send (CRON_SECRET-protected)
 ```
 
 ### Security model
@@ -66,7 +87,8 @@ whenever they change.
 | Script                          | Installs                                                    |
 | ------------------------------- | ----------------------------------------------------------- |
 | `supabase/admin-auth-setup.sql` | Admin roles/permissions/accounts, RLS policies, audit logs, the legacy suspension RPC, `pro_grants` |
-| `supabase/admin-data-views.sql` | Directory views + dashboard stats + lookup RPCs + the **atomic** suspension RPC (+ indexes) |
+| `supabase/admin-data-views.sql` | Directory views (incl. `admin_referrals` + referral-enriched customer directory) + dashboard stats + the **atomic** suspension RPC + `admin_referral_leaderboard` / `admin_monthly_report` RPCs (+ indexes) |
+| `supabase/admin-broadcast-setup.sql` | The `admin_broadcast` notification type + per-user preference, the `notifications.send` permission, and the `admin_report_logs` idempotency ledger |
 
 The second script is what makes the admin app scale: the dashboard, user
 search, admin list, and audit viewer each run **one** O(page) query instead
@@ -108,6 +130,22 @@ Actions secrets for CI):
 | `NEXT_PUBLIC_SUPABASE_URL`             | Browser, server, proxy             |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser, server, proxy (anon key)  |
 | `SUPABASE_SERVICE_ROLE_KEY`            | Server-only (`lib/supabase/admin`) |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`         | Web Push leg of broadcasts — MUST be the same values the customer web app uses |
+| `VAPID_PRIVATE_KEY`                    | Web Push signing (server-only)     |
+| `VAPID_SUBJECT`                        | Push service contact (mailto:)     |
+| `ZEPTOMAIL_API_KEY`                    | Monthly digest email (same key convention as the customer app) |
+| `REPORT_RECIPIENT_EMAIL`               | Where the digest lands (falls back to `ADMIN_NOTIFICATION_EMAIL`) |
+| `REPORT_FROM_EMAIL`                    | Optional verified sender (default `info@konneqta.com`) |
+| `CRON_SECRET`                          | Protects `/api/cron/monthly-report` (Vercel injects the header automatically) |
+
+### Scheduled jobs
+
+`vercel.json` registers a Vercel Cron hitting `/api/cron/monthly-report`
+daily at 06:00 UTC. The route sends only within the first 3 days of a month
+(a missed run retries the next day) and sends each period exactly once
+(`admin_report_logs` unique index). To re-send a period, use Reports →
+"Send now" as a Super Admin (that path deliberately clears the idempotency
+row first).
 
 The build is designed to succeed even when these are absent (CI), but the app
 requires them at runtime.

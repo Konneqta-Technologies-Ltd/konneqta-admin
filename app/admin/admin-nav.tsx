@@ -6,8 +6,11 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/users", label: "Users" },
+  { href: "/admin/referrals", label: "Referrals" },
   { href: "/admin/grants", label: "Pro grants", grantPermissionOnly: true },
   { href: "/admin/promos", label: "Promo codes", promoPermissionOnly: true },
+  { href: "/admin/broadcast", label: "Broadcast", notifyPermissionOnly: true },
+  { href: "/admin/reports", label: "Reports", notifyPermissionOnly: true },
   { href: "/admin/admins", label: "Admins", superAdminOnly: true },
   { href: "/admin/audit", label: "Audit log" },
 ];
@@ -16,11 +19,13 @@ export function AdminNav({
   isSuperAdmin,
   canGrantPro = false,
   canManagePromos = false,
+  canSendNotifications = false,
   mobile = false,
 }: {
   isSuperAdmin: boolean;
   canGrantPro?: boolean;
   canManagePromos?: boolean;
+  canSendNotifications?: boolean;
   mobile?: boolean;
 }) {
   const pathname = usePathname();
@@ -43,6 +48,12 @@ export function AdminNav({
         if (link.superAdminOnly && !isSuperAdmin) return null;
         if (link.grantPermissionOnly && !canGrantPro) return null;
         if (link.promoPermissionOnly && !canManagePromos) return null;
+        if (
+          link.notifyPermissionOnly &&
+          !canSendNotifications &&
+          !isSuperAdmin
+        )
+          return null;
         const active =
           link.href === "/admin"
             ? pathname === "/admin"

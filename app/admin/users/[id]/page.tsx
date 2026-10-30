@@ -3,6 +3,7 @@ import { hasPermission, requireAdmin } from "@/lib/auth/guard";
 import Link from "next/link";
 import { UserStatusButton } from "../user-actions";
 import { GrantProPanel } from "./grant-pro-panel";
+import { NotifyPanel } from "./notify-panel";
 import { formatDate } from "../../format";
 import { getCustomerUser } from "@/lib/admin/data";
 import { grantState, listGrants, proState } from "@/lib/admin/grants";
@@ -27,6 +28,7 @@ export default async function AdminUserDetailPage({
   if (!user) notFound();
   const canUpdate = await hasPermission(session, "users.update");
   const canGrantPro = await hasPermission(session, "users.grant_pro");
+  const canNotify = await hasPermission(session, "notifications.send");
 
   // Effective Pro state (mirrors the customer app's lazy isPro() expiry).
   const { isPro: isProEffective, daysLeft } = proState({
@@ -69,7 +71,30 @@ export default async function AdminUserDetailPage({
           label="Account status"
           value={user.status[0].toUpperCase() + user.status.slice(1)}
         />
+        <Detail label="Referral code" value={user.referralCode ?? "—"} mono />
+        <Detail
+          label="Referred by"
+          value={user.referredByUsername ? "@" + user.referredByUsername : "—"}
+        />
       </div>
+      <section className="mt-4">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <h2 className="text-sm font-semibold text-white">Referrals</h2>
+          <p className="mt-1 text-xs text-zinc-400">
+            {user.referralSignups} signup{user.referralSignups === 1 ? "" : "s"}{" "}
+            via this user&apos;s code, {user.referralRewards} converted (rewards
+            paid).
+          </p>
+          {user.referralCode && (
+            <Link
+              href={"/admin/referrals?code=" + user.referralCode}
+              className="mt-3 inline-block text-sm font-medium text-white hover:underline"
+            >
+              View the people they referred →
+            </Link>
+          )}
+        </div>
+      </section>
 
       {canGrantPro && (
         <div className="mt-4">
@@ -79,6 +104,12 @@ export default async function AdminUserDetailPage({
             isPro={isProEffective}
             daysLeft={daysLeft}
           />
+        </div>
+      )}
+
+      {canNotify && (
+        <div className="mt-4">
+          <NotifyPanel userId={user.id} />
         </div>
       )}
 

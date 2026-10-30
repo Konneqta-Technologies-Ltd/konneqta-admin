@@ -31,6 +31,11 @@ export type CustomerUser = {
   status: "active" | "deactivated" | "suspended";
   createdAt: string;
   cardCount: number;
+  referralCode: string | null;
+  referredById: string | null;
+  referredByUsername: string | null;
+  referralSignups: number;
+  referralRewards: number;
 };
 
 export type AdminRole = {
@@ -71,6 +76,11 @@ type DirectoryRow = {
   status: "active" | "deactivated" | "suspended";
   created_at: string | null;
   card_count: number | null;
+  referral_code: string | null;
+  referred_by_id: string | null;
+  referred_by_username: string | null;
+  referral_signups: number | null;
+  referral_rewards: number | null;
 };
 
 export const CUSTOMERS_PER_PAGE = 25;
@@ -155,6 +165,11 @@ function toCustomerUser(row: DirectoryRow): CustomerUser {
     status: row.status,
     createdAt: row.created_at ?? "",
     cardCount: row.card_count ?? 0,
+    referralCode: row.referral_code ?? null,
+    referredById: row.referred_by_id ?? null,
+    referredByUsername: row.referred_by_username ?? null,
+    referralSignups: row.referral_signups ?? 0,
+    referralRewards: row.referral_rewards ?? 0,
   };
 }
 

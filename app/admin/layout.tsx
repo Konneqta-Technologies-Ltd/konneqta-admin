@@ -1,4 +1,5 @@
 import { AdminNav } from "./admin-nav";
+import { EventsBell } from "./events-bell";
 import { LogoutButton } from "./logout-button";
 import { hasPermission, requireAdmin } from "@/lib/auth/guard";
 
@@ -17,6 +18,11 @@ export default async function AdminLayout({
   const isSuperAdmin = session.admin?.role.name === "super_admin";
   const canGrantPro = await hasPermission(session, "users.grant_pro");
   const canManagePromos = await hasPermission(session, "promos.manage");
+  const canSendNotifications = await hasPermission(
+    session,
+    "notifications.send"
+  );
+  const canReadEvents = await hasPermission(session, "users.read");
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-white">
@@ -40,6 +46,7 @@ export default async function AdminLayout({
           isSuperAdmin={isSuperAdmin}
           canGrantPro={canGrantPro}
           canManagePromos={canManagePromos}
+          canSendNotifications={canSendNotifications}
         />
 
         <div className="border-t border-zinc-800 p-3">
@@ -64,6 +71,7 @@ export default async function AdminLayout({
           <div className="hidden md:block" />
 
           <div className="flex items-center gap-4">
+            {canReadEvents && <EventsBell />}
             <div className="text-right">
               <p className="hidden text-sm font-medium leading-tight md:block">
                 {session.email}
@@ -85,6 +93,7 @@ export default async function AdminLayout({
           isSuperAdmin={isSuperAdmin}
           canGrantPro={canGrantPro}
           canManagePromos={canManagePromos}
+          canSendNotifications={canSendNotifications}
           mobile
         />
 
